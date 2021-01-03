@@ -1,0 +1,344 @@
+---
+title: '**Visualisation des gares en Auvergne-Rhône-Alpes'
+author: "Saïda Guezoui"
+output:
+  word_document: default
+  pdf_document:
+    number_sections: yes
+  html_document:
+    number_sections: yes
+  html_notebook:
+    number_sections: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = TRUE)
+```
+
+Chargeons le package. Il fait partie de `tidyverse`, on peut donc se contenter de charger cet ensemble de package. 
+
+```{r ggplot2}
+suppressMessages(library(tidyverse))
+# Si tidyverse est mal installé chez vous, chargez :
+# library(ggplot2)
+# library(tibble)
+# library(tidyr)
+# library(readr)
+# library(dplyr)
+
+```
+
+
+# Collecte des données
+
+## Les gares SNCF
+
+On commence par récupérer les données utiles, c'est-à-dire les données géographiques, et les données sur les gares.
+
+Le fichier `liste_gares.rda` contient la table `liste_gares` enregistrée au format R. Et la table `fr` contient des points sur les frontières des département de France. On peut charger ces données ainsi :
+
+```{r charge_gares}
+load("liste_gares.rda")
+fr <- map_data("france")
+```
+
+
+```{r ANSgares_ARA}
+gares_ARA <- liste_gares %>% 
+  
+  filter(Region_SNCF == "Auvergne-Rhône-Alpes") %>% 
+  
+  select(Intitule_gare,
+         lattitude,longitude,
+         Segment_DRG, 
+         Departement) %>% 
+  
+  filter( Segment_DRG == "a" | Segment_DRG == "b")
+
+gares_ARA
+```
+
+La colonne `Segment_DRG` permet de différencier les gares suivant 3 catégories :
+
+- Catégorie A : gares de voyageurs d’intérêt national. Ces gares sont celles dont la fréquentation par des voyageurs des services nationaux et internationaux de voyageurs est au moins égale à 250 000 voyageurs par an ou dont ces mêmes voyageurs représentent 100% des voyageurs.
+
+- Catégorie B : gares de voyageurs d’intérêt régional. Le périmètre de gestion correspond, dans chaque région, à l’ensemble des gares n’appartenant pas à la catégorie a mais dont la fréquentation totale est au moins égale à 100 000 voyageurs par an.
+
+- Catégorie C : gares de voyageurs d’intérêt local. Leur périmètre de gestion correspond, dans chaque région, à l’ensemble des gares de cette catégorie. La redevance est fixée, par région, pour l’ensemble des gares de cette catégorie.
+
+
+```{r ANSnettoyage}
+# 1. Calcul du nombre de lignes
+
+nrow(gares_ARA)
+
+# il y a 132 lignes
+
+#2. Vérification de NA 
+nrow(na.omit(gares_ARA)) == nrow(gares_ARA)
+
+# 3. Construction de la table comptage
+
+comptage <- gares_ARA %>% 
+  group_by(Departement, Segment_DRG) %>% 
+  summarize(
+    count = n())
+comptage
+
+# 4. Instruction pivot_wider 
+
+comptagew <- comptage %>% 
+  pivot_wider(names_from = Segment_DRG,
+              values_from = count )
+
+# Pour éviter les problèmes d'opération entre un NA et un entier,                            on remplace les NA par 0 comme suit : 
+
+comptagew$a[is.na(comptagew$a)]<- 0  
+
+# 5. Tri par ordre décroissant 
+
+comptagew <- arrange(comptagew, desc(a+b))
+comptagew
+```
+
+
+## Les départements d'Auvergne-Rhône-Alpes
+
+On récupère ensuite les données géographiques concernant la région Auvergne-Rhône-Alpes (ARA), c'est-à-dire les départements "Ain", "Allier", "Ardeche", "Cantal", "Drome", "Isere", "Loire", "Haute-Loire", "Puy-de-Dome", "Rhone", "Savoie", "Haute-Savoie", en filtrant la table `fr` sur la colonne `region`. On enregistrera le résultat de ce filtrage dans une table nommée dpt_ARA.
+
+```{r ANSdpt_ARA}
+ARA <- c("Ain", "Allier", "Ardeche", "Cantal", "Drome", "Isere",
+         "Loire", "Haute-Loire", "Puy-de-Dome", "Rhone", "Savoie", "Haute-Savoie")
+
+dpt_ARA <- filter(fr, region %in% ARA)
+
+```
+
+
+```{r ANSg_dpt_ARA}
+g_dpt_ARA <- dpt_ARA %>% 
+  group_by(region) %>% 
+  summarize(
+    long_moy = mean(long,na.rm = TRUE),
+    lat_moy = mean(lat,na.rm = TRUE)) %>%  
+  ungroup()
+
+g_dpt_ARA
+```
+
+
+# Des cartes géographiques
+
+Les sections 2 à 5 ajoutent des couches au graphique `p` défini dans le chunk ci-dessous, pour lequel il n'y a par défaut, ni jeu de données, ni correspondance esthétique.
+
+```{r p_initialisation}
+p <- ggplot()             # ligne 1
+p <- p + coord_quickmap() # ligne 2
+p <- p + theme_void()     # ligne 3
+```
+
+
+On commence par ajouter le fond de carte en traçant les contours des départments. 
+
+```{r ANS_ajout_fond}
+p <- ggplot(dpt_ARA, 
+            aes(x = long, 
+                y = lat, 
+                group = group))
+p <- p +
+  geom_polygon(aes(fill = region),
+                      colour = "grey50", 
+                      alpha = 0.4, 
+                      show.legend = FALSE)
+
+p <- p + coord_quickmap()
+p <- p + theme_void()
+p
+```
+
+
+```{r}
+p_dpt <- p +  
+  geom_text(data = g_dpt_ARA, 
+                        aes(label = region, 
+                            x = long_moy,
+                            y = lat_moy), 
+                        inherit.aes = FALSE, 
+                        fontface = "bold", 
+                        size = 3,
+                        color = "gray20")
+
+p_dpt
+ggsave("GUEZOUI_departement_ARA.pdf", p_dpt)
+```
+
+
+# Ajout des gares
+
+On ajoute ensuite la couche de points qui symbolisent les gares.
+
+
+```{r ANSp1}
+p1 <-  p +
+  geom_point(data = gares_ARA,
+                      aes(x = longitude,
+                          y = lattitude, 
+                          colour = factor(Segment_DRG), 
+                          shape = factor(Segment_DRG),
+                          size = factor(Segment_DRG)),
+                      inherit.aes = FALSE)
+p1
+```
+
+On remarque dans la légende que les deux modalités de la variable `Segment_DRG` apparaissent dans l'ordre `a` puis `b`. Le choix des couleurs, et des tailles n'est pas le bon. En outre, on veut supprimer le guide à droite concernant la variable `Segment_DRG`.
+
+
+```{r ANSgares}
+
+p <-  p +
+  geom_point(data = gares_ARA,
+                      aes(x = longitude,
+                          y = lattitude, 
+                          colour = factor(Segment_DRG), 
+                          shape = factor(Segment_DRG),
+                          size = factor(Segment_DRG)),
+                      inherit.aes = FALSE,
+                      show.legend = FALSE)
+p
+
+```
+
+On veut maintenant régler manuellement l'échelle des tailles et des couleurs pour que :
+
+- les gares de type `a` (nationales) soient en taille 4, de couleur "black",
+- les gares de type `b` (régionales) soient en taille 1, de couleur "grey50".
+
+Pour les couleurs, il faut utiliser la fonction `scale_color_manual`, et donner les valeurs que l'on souhaite dans l'ordre d'apparition des modalités. Ce qui donne ici :
+
+```{r choix_couleurs}
+p <- p + 
+  scale_color_manual(values = c("black", "grey50"))
+p
+```
+
+En s'inspirant de ce qui est écrit dans le chunk `choix_couleurs`, utiliser la fonction `scale_size_manual` pour choisir les tailles des points comme souhaité plus haut.
+
+```{r ANSchoix_taille}
+p <- p + scale_size_manual(values = c(4, 1))
+p <- p +
+  geom_point(data = gares_ARA,
+                      aes(x = longitude, y = lattitude, 
+                          colour = factor(Segment_DRG), 
+                          shape = factor(Segment_DRG),
+                          size = factor(Segment_DRG)),
+                      inherit.aes = FALSE,
+                      show.legend = FALSE)
+p
+
+```
+
+# Ajout des noms des grandes gares
+
+```{r ANSlabel_a}
+p <- p + 
+  geom_text(data = filter(gares_ARA,
+                          Segment_DRG == "a"),
+            aes(label = Intitule_gare, 
+                x = longitude,
+                y = lattitude), 
+            inherit.aes = FALSE,
+            fontface = "bold",
+            size = 3,
+            hjust = "center",
+            vjust = "bottom",
+            nudge_y = -0.1)
+p
+```
+
+
+# Ajout des noms de quelques gares régionales
+
+```{r ANSlabel_b}
+p <- p +
+  geom_text(data = filter(gares_ARA,Departement == "Allier" | Departement == "Cantal"),
+               aes(label = Intitule_gare, 
+                   x = longitude,
+                   y = lattitude),
+            inherit.aes = FALSE,
+            fontface = "italic",
+            size = 1.5,
+            nudge_y = 0.02,
+            color = "gray30")
+p
+
+```
+
+
+```{r sauvegarde_gares}
+ggsave(filename = "GUEZOUI_gares_ARA.pdf",
+       plot = p,
+       width = 9,
+       height = 9)
+```
+
+# Comparaison des âges des usagers des gares de Lyon Part Dieu et de Grenoble
+
+
+Le fichier `comparaison20.rda` contient une table nommée `deux_gares` concernant les deux gares de Lyon Part Dieu et et Grenoble. Les colonnes dont le nom commence par `age` contiennent la répartition des clients dans les différentes classes d'âges (en pourcentage). Les colonnes dont le nom commence par type contiennent la répartition des types de clients. Ses informations sont construites à partir des résultats du TP 4.
+
+```{r donnees}
+load("comparaison20.RData")
+deux_gares
+```
+
+## Ré-organisation
+
+```{r ANScreer_age}
+classe_age <- c("age.0.19","age.20.29","age.30.39",
+                 "age.40.49","age.50.59","age.60.")
+
+age_deux_gares <- deux_gares %>% 
+  
+  pivot_longer(c("age.0.19","age.20.29","age.30.39",
+                 "age.40.49","age.50.59","age.60.",
+                 "F","H","typeCorrespondant",
+                 "typeArrivant", "typePartant",
+                 "typeNonvoyageur"),
+               names_to = "classe",
+               values_to = "pourcent") %>%
+  filter(classe %in% classe_age)
+age_deux_gares
+
+```
+
+## Graphique
+
+```{r ANSreproduire}
+# 1. Reproduction du graphe age
+
+ggplot() + 
+  geom_col(data = age_deux_gares,
+           aes(x = classe,
+               y = pourcent, 
+               fill = Intitule_gare), 
+position = "dodge") + 
+  labs(x = "", 
+       y = "Pourcentage", 
+       fill = "Gare :") +
+  scale_fill_discrete(labels = c("Gren.", "Lyon P.D.")) +
+  scale_x_discrete(labels = c("0 - 19 ans", "20 - 29 ans", "30 - 39 ans", 
+                              "40 -49 ans", "50 - 59 ans", "60 ans et +")) +
+  theme_classic() +
+  coord_flip()
+
+# 2. Enregistrement du résultat dans un fichier pdf : 
+
+ggsave("GUEZOUI_age.pdf", 
+       width = 10,
+       height = 6)
+
+```
+
+
+
+
